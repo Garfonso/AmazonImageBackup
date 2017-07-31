@@ -1,0 +1,27 @@
+{
+  "name": "amazon_image_sync",
+  "version": "1.0.0",
+  "description": "Syncs image files to amazon drive.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Garfonso/AmazonImageSync.git"
+  },
+  "keywords": [
+    "Amazon",
+    "Drive",
+    "Fotos"
+  ],
+  "author": "Garfonso",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Garfonso/AmazonImageSync/issues"
+  },
+  "homepage": "https://github.com/Garfonso/AmazonImageSync#readme",
+  "dependencies": {
+    "promise": "^8.0.1"
+  }
+}
