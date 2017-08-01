@@ -125,6 +125,51 @@ refreshToken = function(realRefresh) {
     return promise;
 };
 
+function nodesFromData(data) {
+    if (data.data.length >= 0) {
+        return data.data;
+    }
+    if (data.length >= 0) {
+        return data;
+    }
+    throw "No nodes found in data.";
+}
+
+function createFolder(parentNode, name) {
+    debug("Creating " + name + " in " + (parentNode.name || "root"));
+    let createUrl = "nodes?localId=GarfonsoImageSync";
+    let jsonData = {
+        name: name,
+        kind: "FOLDER",
+        parents: [parentNode.id]
+    };
+    return requestMetadata(createUrl, jsonData);
+}
+
+function listChildren(node, filter, children = [], nextToken = undefined) {
+    let childrenUrl = "nodes/" + node.id + "/children";
+    if (filter) {
+        childrenUrl += "?filters=" + filter;
+    }
+    if (nextToken) {
+        if (!filter) {
+            childrenUrl += "?";
+        } else {
+            childrenUrl += "&";
+        }
+        childrenUrl += "startToken=" + nextToken;
+    }
+    let promise = requestMetadata(childrenUrl);
+
+    promise = promise.then(function (res) {
+        children = children.concat(nodesFromData(res));
+        //debug("Got children: ", children);
+        if (res.nextToken) {
+            return listChildren(node, filter, children, res.nextToken);
+        } else {
+            return children;
+        }
+    });
 
     return promise;
 }
