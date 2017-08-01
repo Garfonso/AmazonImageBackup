@@ -11,6 +11,7 @@ const https = require("https");
 const url = require("url");
 const querystring = require("querystring");
 const fs = require("fs");
+const crypto = require("crypto");
 
 //parameter files:
 const auth = require("./auth.json");
@@ -28,7 +29,18 @@ function debug(...msgs) {
 //denodifications:
 const readFilePromise = NodePromise.denodeify(fs.readFile);
 const writeFilePromise = NodePromise.denodeify(fs.writeFile);
-function requestPromise(options, postData, decode) {
+
+let authHeader;
+let refreshToken;
+function requestPromise(options, postData, decode = true, retry = 0) {
+    //add auth header.
+    if (authHeader) {
+        if (options.headers) {
+            options.headers.Authorization = authHeader;
+        } else {
+            options.headers = {"Authorization": authHeader};
+        }
+    }
     let promise = new NodePromise(function resolver(resolve, reject) {
         //debug("Sending request", options);
         let req = https.request(options, function callback(res) {
@@ -38,27 +50,52 @@ function requestPromise(options, postData, decode) {
             res.on("data", function (chunk) { data += chunk; });
             res.on("end", function () {
                 //debug("Body: ", data);
-                if (res.statusCode === 200) {
+                if (res.statusCode >= 200 && res.statusCode < 300) {
                     if (decode) {
                         resolve(JSON.parse(data));
                     } else {
                         resolve(data);
                     }
+                } else if (res.statusCode === 401 && !retry) {
+                    //need to refresh token.
+                    let innerPromise = refreshToken(true);
+                    innerPromise = innerPromise.then(function retryRequest() { //retry request.
+                        return requestPromise(options, postData, decode, retry + 1);
+                    });
+                    resolve(innerPromise);
                 } else {
                     reject({msg: "Status code not 200: " + res.statusCode, data: data});
                 }
             });
         });
         req.on("error", (err) => reject(err));
+        //debug("Writing:", postData);
         req.end(postData);
     });
 
     return promise;
 }
 
-let authHeader;
-function refreshToken(realRefresh) {
+//request from metadata server
+function requestMetadata(path, jsonData, decode) {
+    let options = url.parse(auth.metadataUrl + path);
+    let postData;
+    if (jsonData) {
+        postData = JSON.stringify(jsonData);
+        options.headers = {"Content-Length": Buffer.byteLength(postData)};
+        options.method = "POST";
+    }
+    return requestPromise(options, postData, decode);
+}
+//request from content server
+function requestContent(path, decode) {
+    let options = url.parse(auth.contentUrl + path);
+    return requestPromise(options, undefined, decode);
+}
+//handle all token stuff. will also update authorization header.
+refreshToken = function(realRefresh) {
     let promise;
+    authHeader = "";
     if (!realRefresh) {
         promise = readFilePromise(config.accessTokenPath, "utf8");
 
@@ -68,6 +105,7 @@ function refreshToken(realRefresh) {
             authHeader = "Bearer " + token.access_token;
             return token;
         }, function needToRefresh() {
+            debug("No token file. Get new token.");
             return refreshToken(true);
         });
     } else {
@@ -84,6 +122,9 @@ function refreshToken(realRefresh) {
             return writeFilePromise(config.accessTokenPath, JSON.stringify(token, null, 4), "utf8");
         });
     }
+    return promise;
+};
+
 
     return promise;
 }
