@@ -174,6 +174,27 @@ function listChildren(node, filter, children = [], nextToken = undefined) {
     return promise;
 }
 
+//create md5 hash of a file for did change check:
+function md5Hash(filename) {
+    let promise = new NodePromise(function resolver(resolve, reject) {
+        let md5sum = crypto.createHash("md5");
+        const input = fs.createReadStream(filename);
+        input.on("readable", function () { //using readable should increase throughput.
+            const data = input.read();
+            if (data) {
+                md5sum.update(data);
+            } else {
+                const d = md5sum.digest("hex");
+                resolve(d);
+            }
+        });
+        input.on("error", function (err) {
+            reject(err);
+        });
+    });
+    return promise;
+}
+
 //first get access_token:
 let promise = refreshToken();
 
