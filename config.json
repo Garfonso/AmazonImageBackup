@@ -1,0 +1,7 @@
+{
+  "refreshProxyUrl": "https://drivesink.appspot.com/refresh",
+  "debugging": true,
+  "accessTokenPath": "./auth_access.json",
+  "targetPath": "/Images/",
+  "sourcePath": "~/images"
+}

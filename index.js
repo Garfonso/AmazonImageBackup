@@ -9,21 +9,23 @@
 const NodePromise = require("promise");
 const https = require("https");
 const url = require("url");
-const auth = require("./auth.json");
 const querystring = require("querystring");
 const fs = require("fs");
 
-//use someone elses client secret, because amazon won't give out new secrects, currently. :-(
-const refreshProxyUrl = "https://drivesink.appspot.com/refresh";
-const debugging = true;
-const accessTokenPath = "./auth_access.json";
+//parameter files:
+const auth = require("./auth.json");
+const config = require("./config.json");
+if (config.targetPath.charAt(config.targetPath.length -1) !== "/") {
+    config.targetPath += "/";
+}
 
 function debug(...msgs) {
-    if (debugging) {
+    if (config.debugging) {
         console.log(...msgs);
     }
 }
 
+//denodifications:
 const readFilePromise = NodePromise.denodeify(fs.readFile);
 const writeFilePromise = NodePromise.denodeify(fs.writeFile);
 function requestPromise(options, postData, decode) {
@@ -58,7 +60,7 @@ let authHeader;
 function refreshToken(realRefresh) {
     let promise;
     if (!realRefresh) {
-        promise = readFilePromise(accessTokenPath, "utf8");
+        promise = readFilePromise(config.accessTokenPath, "utf8");
 
         promise = promise.then(function gotToken(data) {
             let token = JSON.parse(data);
@@ -69,7 +71,7 @@ function refreshToken(realRefresh) {
             return refreshToken(true);
         });
     } else {
-        let options = url.parse(refreshProxyUrl);
+        let options = url.parse(config.refreshProxyUrl);
         options.method = "POST";
         let postData = querystring.stringify({refresh_token: auth.refresh_token});
         options.headers = {"Content-Length": Buffer.byteLength(postData)};
@@ -79,7 +81,7 @@ function refreshToken(realRefresh) {
         promise = promise.then(function storeToken(token) {
             debug("Got token from refresh.");
             authHeader = "Bearer " + token.access_token;
-            return writeFilePromise(accessTokenPath, JSON.stringify(token, null, 4), "utf8");
+            return writeFilePromise(config.accessTokenPath, JSON.stringify(token, null, 4), "utf8");
         });
     }
 
