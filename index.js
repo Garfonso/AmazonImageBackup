@@ -177,10 +177,50 @@ function listChildren(node, filter, children = [], nextToken = undefined) {
 //first get access_token:
 let promise = refreshToken();
 
-/*promise = promise.then(function getRootNode() {
-    let options = "";
-    //requestPromise()
-});*/
+promise = promise.then(function getRootNode() {
+    return requestMetadata("nodes?filters=isRoot:true");
+});
+
+promise = promise.then(function hangleToTargetPath(data) {
+    let root = nodesFromData(data)[0]; //can we have multiple root nodes?
+    let currentNode = root;
+    let currentPath = "/";
+    let remainingPathItems = config.targetPath.split("/");
+    remainingPathItems.pop();
+    remainingPathItems.shift();
+
+    function getDown() {
+        //debug("remainingPath: ", remainingPathItems);
+        if (remainingPathItems.length === 0) {
+            if (currentPath !== config.targetPath) {
+                throw currentPath + " != " + config.targetPath + ". Somehow path hangling went wrong.";
+            }
+            return currentNode;
+        }
+        let innerPromise = listChildren(currentNode, "kind:FOLDER");
+        innerPromise = innerPromise.then(function (children) {
+            let found = false;
+            children.forEach(function (child) {
+                if (child.name === remainingPathItems[0]) {
+                    //debug("Found next part: ", child);
+                    currentNode = child;
+                    currentPath += child.name + "/";
+                    found = true;
+                }
+            });
+            if (!found) {
+                return createFolder(currentNode, remainingPathItems[0]);
+            }
+            remainingPathItems.shift();
+            return getDown();
+        });
+
+        return innerPromise;
+    }
+
+    return getDown();
+});
+
 
 promise = promise.then(function allgood(result) {
     console.log("All good:", result);
