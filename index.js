@@ -138,9 +138,9 @@ function nodesFromData(data) {
     throw "No nodes found in data.";
 }
 
-function createFolder(parentNode, name) {
+function createFolder(parentNode, name, fullPath) {
     debug("Creating " + name + " in " + (parentNode.name || "root"));
-    let createUrl = "nodes?localId=GarfonsoImageSync";
+    let createUrl = "nodes?localId=" + fullPath;
     let jsonData = {
         name: name,
         kind: "FOLDER",
@@ -233,7 +233,7 @@ promise = promise.then(function hangleToTargetPath(data) {
                 }
             });
             if (!found) {
-                return createFolder(currentNode, remainingPathItems[0]);
+                return createFolder(currentNode, remainingPathItems[0], currentPath + remainingPathItems[0]);
             }
             remainingPathItems.shift();
             return getDown();
