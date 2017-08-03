@@ -224,60 +224,11 @@ function listChildren(node, filter, children = [], nextToken = undefined) {
 
 function findTypeFromName(name) {
     let ext = path.extname(name).toLocaleLowerCase();
-    switch (ext) {
-        case ".cod":
-            return "cis-cod";
-        case ".ras":
-            return "cmu-raster";
-        case ".bmp":
-        case ".bm":
-            return "bmp";
-        case ".fif":
-            return "fif";
-        case ".gif":
-            return "gif";
-        case ".ief":
-            return "ief";
-        case ".jpeg":
-        case ".jpg":
-        case ".jpe":
-            return "jpeg";
-        case ".png":
-            return "png";
-        case ".tif":
-        case ".tiff":
-            return "tiff";
-        case ".mcf":
-            return "vasa";
-        case ".wbmp":
-            return "vnd.wap.wbmp";
-        case ".fh4":
-        case ".fh5":
-        case ".fhc":
-            return "x-freehand";
-        case ".ico":
-            return "x-icon";
-        case ".pic":
-            return "pict";
-        case ".pnm":
-            return "x-portable-anymap";
-        case ".pbm":
-            return "x-portable-bitmap";
-        case ".pgm":
-            return "x-portable-graymap";
-        case ".ppm":
-            return "x-portable-pixmap";
-        case ".rgp":
-            return "x-rgb";
-        case ".xwd":
-            return "x-windowdump";
-        case ".xbm":
-            return "x-xbitmap";
-        case ".xpm":
-            return "x-xpixmap";
-        default:
-            return "jpeg";
+    let mime = config.extensionsWithMime[ext];
+    if (!mime) {
+        return "image/jpeg";
     }
+    return mime;
 }
 
 //if it already exists, old file will be moved to trash.
@@ -302,7 +253,7 @@ function uploadFile(localChild) {
     }
     data += "Content-Disposition: form-data; name=\"content\"; ";
     data += "filename=\"" + localChild.name + "\"\r\n";
-    data += "Content-Type: image/" + findTypeFromName(localChild.name) + "\r\n\r\n";
+    data += "Content-Type: " + findTypeFromName(localChild.name) + "\r\n\r\n";
 
     let uploadPath = "nodes";
     let overwriteOptions = {
@@ -358,7 +309,7 @@ function createMD5Hash(filename) {
 
 function filterFile(filename) {
     let ext = path.extname(filename).toLocaleLowerCase();
-    return config.extensions.indexOf(ext) >= 0;
+    return !!config.extensionsWithMime[ext];
 }
 
 function checkForDifference(localChild) {
