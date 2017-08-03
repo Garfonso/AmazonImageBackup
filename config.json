@@ -38,5 +38,6 @@
   },
   "silent": false,
   "createScreenSaverFiles": true,
-  "screenSaverTarget": "/Images/0Screensaver"
+  "screenSaverTarget": "/Images/0Screensaver",
+  "exceptionsForScreenSaver": []
 }
