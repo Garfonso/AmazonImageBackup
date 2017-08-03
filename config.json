@@ -36,5 +36,7 @@
     ".xpm": "image/x-xpixmap",
     ".raw": "image/jpeg"
   },
-  "silent": false
+  "silent": false,
+  "createScreenSaverFiles": true,
+  "screenSaverTarget": "/Images/0Screensaver"
 }
