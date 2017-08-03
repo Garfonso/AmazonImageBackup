@@ -1,4 +1,4 @@
-# AmazonImageSync
+# AmazonImageBackup
 
 A tool to sync image files to Amazon Drive.
 
