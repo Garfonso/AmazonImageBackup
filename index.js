@@ -23,6 +23,9 @@ if (config.targetPath.charAt(config.targetPath.length -1) !== "/") {
 if (config.sourcePath.charAt(config.sourcePath.length -1) !== "/") {
     config.sourcePath += "/";
 }
+if (config.silent) {
+    config.debugging = false;
+}
 
 function debug(...msgs) {
     if (config.debugging) {
@@ -317,7 +320,9 @@ function uploadFile(localChild) {
     overwriteOptions.headers = {
         "Content-Type": "multipart/form-data; boundary=--WebKitFormBoundaryE19zNvXGzXaLvS5C"
     };
-    debug("Uploading " + localChild.name + " to " + localChild.parentNode.name);
+    if (!config.silent) {
+        console.log("Uploading " + localChild.name + " to " + localChild.parentNode.name);
+    }
     //debug("Url: ", uploadPath);
     //debug("Options:", overwriteOptions);
     stats.uploaded += 1;
@@ -554,8 +559,10 @@ promise = promise.then(function startBackup(targetRoot) {
     return syncFolder(targetRoot, config.sourcePath);
 });
 
-promise = promise.then(function allgood(result) {
-    console.log("All good:", stats);
+promise = promise.then(function allgood() {
+    if (!config.silent) {
+        console.log("All good:", stats);
+    }
 }, function haderror(err) {
     console.log("Had error:", err);
 });

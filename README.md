@@ -29,6 +29,7 @@ Then you should adjust config.json to your likings. Parameters are:
 | sourcePath | Path on your system to read the images from. |
 | writeHashes | If set to "true" will write a NAME.EXT.MD5 file for each file processed to store the md5 hash. Will process difference checking later. Hash will be recalculated if md5 file is older than last change on image file. |
 | extensions | Will only include files with an extension that matches one of the strings. Add extensions if you miss something. |
+| silent | If set to "true" no output will happen. Will overwrite debugging setting. |
 
 Then run `node index.js`
 
