@@ -9,6 +9,7 @@
 const NodePromise = require("promise");
 const https = require("https");
 const url = require("url");
+const path = require("path");
 const querystring = require("querystring");
 const fs = require("fs");
 const crypto = require("crypto");
@@ -29,9 +30,22 @@ function debug(...msgs) {
     }
 }
 
+let stats = {
+    uploaded: 0,
+    foldersCreated: 0,
+    skipped: 0,
+    alreadyPresent: 0,
+    updated: 0,
+    bytesUploaded: 0,
+    foldersProcessed: 0,
+    filesProcessed: 0
+};
+
 //denodifications:
 const readFilePromise = NodePromise.denodeify(fs.readFile);
 const writeFilePromise = NodePromise.denodeify(fs.writeFile);
+const readdirPromise = NodePromise.denodeify(fs.readdir);
+const statPromise = NodePromise.denodeify(fs.stat);
 
 let authHeader;
 let refreshToken;
@@ -173,6 +187,7 @@ function createFolder(parentNode, name, fullPath) {
         kind: "FOLDER",
         parents: [parentNode.id]
     };
+    stats.foldersCreated += 1;
     return requestMetadata(createUrl, jsonData);
 }
 
@@ -336,6 +351,158 @@ function createMD5Hash(filename) {
     return promise;
 }
 
+function filterFile(filename) {
+    let ext = path.extname(filename).toLocaleLowerCase();
+    return config.extensions.indexOf(ext) >= 0;
+}
+
+function checkForDifference(localChild) {
+    //try to read md5 hash:
+    let promise = readFilePromise(localChild.path + ".md5", "utf8");
+
+    promise = promise.then(function processHash(md5Hash) {
+        //check mtimes:
+        let ip = statPromise(localChild.path);
+        ip = ip.then(function (stat) {
+            localChild.mtime = stat.mtime;
+            return statPromise(localChild.path + ".md5");
+        });
+        ip = ip.then(function (stat) {
+            if (localChild.mtime > stat.mtime) {
+                //debug("MD5 hash of " + localChild.name + " is too old. Creating new one.");
+                return createMD5Hash(localChild.path);
+            } else {
+                //all fine, can use stored hash.
+                return md5Hash;
+            }
+        });
+        return ip;
+    }, function needToCreateMd5Hash() {
+        //debug("No hash for " + localChild.name);
+        return createMD5Hash(localChild.path);
+    });
+
+    promise = promise.then(function compareHashes(md5Hash) {
+        //debug("Node: ", localChild.node);
+        if (localChild.node.contentProperties && localChild.node.contentProperties.md5 && localChild.node.contentProperties.md5 === md5Hash) {
+            //debug("All fine. Files are identical.");
+            stats.alreadyPresent += 1;
+            return true;
+        } else {
+            //debug("Hashes not identical (" + md5Hash + " !=", localChild.node.contentProperties,") or no hash. Reupload file.");
+            stats.updated += 1;
+            return uploadFile(localChild);
+        }
+    });
+
+    return promise;
+}
+
+let syncFolder;
+function processFolder(localChild) {
+    if (localChild.inCloud && localChild.node.kind !== "FOLDER") {
+        throw "Error " + localChild.name + " exists as dir in " + localChild.parent + ", but remotely is " + localChild.node.kind + ". Please corect manually.";
+    }
+
+    //debug("Processing " + localChild.name);
+    if (!localChild.inCloud) {
+        //debug("Folder not yet in cloud, create it,", localChild);
+        let promise = createFolder(localChild.parentNode, localChild.name, localChild.path);
+
+        promise = promise.then(function goDeeper(node) {
+            localChild.node = node;
+            return syncFolder(localChild.node, localChild.path);
+        });
+
+        return promise;
+    } else {
+        return syncFolder(localChild.node, localChild.path);
+    }
+}
+
+function processFile(localChild) {
+    if (localChild.inCloud && localChild.node.kind !== "FILE") {
+        throw "Error " + localChild.name + " exists as file in " + localChild.parent + ", but remotely is " + localChild.node.kind + ". Please corect manually.";
+    }
+    stats.filesProcessed += 1;
+
+    if (filterFile(localChild.name)) {
+        if (!localChild.inCloud) {
+            return uploadFile(localChild);
+        } else {
+            return checkForDifference(localChild);
+        }
+    } else {
+        stats.skipped += 1;
+        debug("Skipping " + localChild.name);
+    }
+}
+
+function processLocalChild(localChildren) {
+    let localChild = localChildren.shift();
+    if (localChild) {
+        debug("Processing ", localChild.path);
+        let promise = statPromise(localChild.path);
+        promise = promise.then(function (stat) {
+            localChild.isDir = stat.isDirectory();
+            if (localChild.isDir) {
+                return processFolder(localChild);
+            } else {
+                return processFile(localChild);
+            }
+        });
+
+        promise = promise.then(function processSibling() {
+            return processLocalChild(localChildren);
+        });
+
+        return promise;
+    } else {
+        return NodePromise.resolve(true);
+    }
+}
+
+syncFolder = function(node, folderPath) {
+    //get child nodes.
+    let promise = listChildren(node);
+    let children;
+    let localChildren = [];
+    stats.foldersProcessed += 1;
+
+    promise = promise.then(function (nodes) {
+        children = nodes;
+        return readdirPromise(folderPath);
+    });
+
+    promise = promise.then(function findDirectories(folderContents) {
+        //associate localChildren with cloudChildren:
+        folderContents.forEach(function searchChild(name) {
+            let localChild = {
+                name: name,
+                parent: folderPath,
+                path: path.resolve(folderPath, name),
+                inCloud: false,
+                parentNode: node
+            };
+            children.forEach(function compare(node) {
+                if (node.name === name) {
+                    localChild.inCloud = true;
+                    localChild.node = node;
+                }
+            });
+            localChildren.push(localChild);
+        });
+
+        /*let index = 8;
+        debug(localChildren[index].name);
+        turn processLocalChild(localChildren[index]);*/
+        //return NodePromise.all(localChildren.map(processLocalChild));
+        return processLocalChild(localChildren);
+    });
+
+    return promise;
+};
+
 //first get access_token:
 let promise = refreshToken();
 
@@ -383,9 +550,12 @@ promise = promise.then(function hangleToTargetPath(data) {
     return getDown();
 });
 
+promise = promise.then(function startBackup(targetRoot) {
+    return syncFolder(targetRoot, config.sourcePath);
+});
 
 promise = promise.then(function allgood(result) {
-    console.log("All good:", result);
+    console.log("All good:", stats);
 }, function haderror(err) {
     console.log("Had error:", err);
 });
