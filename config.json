@@ -4,4 +4,11 @@
   "accessTokenPath": "./auth_access.json",
   "targetPath": "/Images/",
   "sourcePath": "~/images"
+  "writeHashes": true,
+  "extensions": [ ".cod",".ras",".bmp",".bm",".fif",
+                  ".gif",".ief",".jpeg",".jpg",".jpe",
+                  ".png",".tif",".tiff",".mcf",".wbmp",
+                  ".fh4",".fh5",".fhc",".ico",".pic",".pnm",
+                  ".pbm",".pgm",".ppm",".rgp",".xwd",".xbm",
+                  ".xpm",".raw"]
 }
