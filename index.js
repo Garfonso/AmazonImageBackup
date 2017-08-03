@@ -68,7 +68,7 @@ function requestPromise(options, postData, decode = true, overwriteOptions = fal
     if (overwriteOptions) {
         options.method = overwriteOptions.method || options.method;
         if (overwriteOptions.headers) {
-            Object.keys(overwriteOptions.headers).forEach((key) => options.headers[key] = overwriteOptions.headers[key]);
+            Object.keys(overwriteOptions.headers).forEach(function(key) { options.headers[key] = overwriteOptions.headers[key];});
         }
     }
     let promise = new NodePromise(function resolver(resolve, reject) {
@@ -407,10 +407,10 @@ function processFile(localChild) {
         } else {
             return checkForDifference(localChild);
         }
-    } else {
-        stats.skipped += 1;
-        debug("Skipping " + localChild.name);
     }
+    //else
+    stats.skipped += 1;
+    debug("Skipping " + localChild.name);
 }
 
 /********************************************************************************************************
