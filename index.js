@@ -50,6 +50,10 @@ const writeFilePromise = NodePromise.denodeify(fs.writeFile);
 const readdirPromise = NodePromise.denodeify(fs.readdir);
 const statPromise = NodePromise.denodeify(fs.stat);
 
+/********************************************************************************************************
+ Low level Reqeuests.
+ ********************************************************************************************************/
+
 let authHeader;
 let refreshToken;
 function requestPromise(options, postData, decode = true, overwriteOptions = false, retry = 0) {
@@ -139,6 +143,11 @@ function requestContent(path, data, decode, overwriteOptions) {
     options.method = "POST";
     return requestPromise(options, data, decode, overwriteOptions);
 }
+
+/********************************************************************************************************
+ Authorization
+ ********************************************************************************************************/
+
 //handle all token stuff. will also update authorization header.
 refreshToken = function(realRefresh) {
     let promise;
@@ -172,6 +181,10 @@ refreshToken = function(realRefresh) {
     return promise;
 };
 
+/********************************************************************************************************
+ Node handling
+ ********************************************************************************************************/
+
 function nodesFromData(data) {
     if (data.data.length >= 0) {
         return data.data;
@@ -181,6 +194,10 @@ function nodesFromData(data) {
     }
     throw "No nodes found in data.";
 }
+
+/********************************************************************************************************
+ Folder creation and listing
+ ********************************************************************************************************/
 
 function createFolder(parentNode, name, fullPath) {
     debug("Creating " + name + " in " + (parentNode.name || "root"));
@@ -221,6 +238,10 @@ function listChildren(node, filter, children = [], nextToken = undefined) {
 
     return promise;
 }
+
+/********************************************************************************************************
+ Upload file
+ ********************************************************************************************************/
 
 function findTypeFromName(name) {
     let ext = path.extname(name).toLocaleLowerCase();
@@ -279,6 +300,10 @@ function uploadFile(localChild) {
     stats.uploaded += 1;
     return requestContent(uploadPath, data, true, overwriteOptions);
 }
+
+/********************************************************************************************************
+ File Syncing
+ ********************************************************************************************************/
 
 //create md5 hash of a file for did change check:
 function createMD5Hash(filename) {
@@ -354,6 +379,28 @@ function checkForDifference(localChild) {
     return promise;
 }
 
+function processFile(localChild) {
+    if (localChild.inCloud && localChild.node.kind !== "FILE") {
+        throw "Error " + localChild.name + " exists as file in " + localChild.parent + ", but remotely is " + localChild.node.kind + ". Please corect manually.";
+    }
+    stats.filesProcessed += 1;
+
+    if (filterFile(localChild.name)) {
+        if (!localChild.inCloud) {
+            return uploadFile(localChild);
+        } else {
+            return checkForDifference(localChild);
+        }
+    } else {
+        stats.skipped += 1;
+        debug("Skipping " + localChild.name);
+    }
+}
+
+/********************************************************************************************************
+ Folder Syncing
+ ********************************************************************************************************/
+
 let syncFolder;
 function processFolder(localChild) {
     if (localChild.inCloud && localChild.node.kind !== "FOLDER") {
@@ -373,24 +420,6 @@ function processFolder(localChild) {
         return promise;
     } else {
         return syncFolder(localChild.node, localChild.path);
-    }
-}
-
-function processFile(localChild) {
-    if (localChild.inCloud && localChild.node.kind !== "FILE") {
-        throw "Error " + localChild.name + " exists as file in " + localChild.parent + ", but remotely is " + localChild.node.kind + ". Please corect manually.";
-    }
-    stats.filesProcessed += 1;
-
-    if (filterFile(localChild.name)) {
-        if (!localChild.inCloud) {
-            return uploadFile(localChild);
-        } else {
-            return checkForDifference(localChild);
-        }
-    } else {
-        stats.skipped += 1;
-        debug("Skipping " + localChild.name);
     }
 }
 
@@ -458,6 +487,10 @@ syncFolder = function(node, folderPath) {
 
     return promise;
 };
+
+/********************************************************************************************************
+ "Main"
+ ********************************************************************************************************/
 
 //first get access_token:
 let promise = refreshToken();
