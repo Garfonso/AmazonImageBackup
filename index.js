@@ -19,6 +19,9 @@ const config = require("./config.json");
 if (config.targetPath.charAt(config.targetPath.length -1) !== "/") {
     config.targetPath += "/";
 }
+if (config.sourcePath.charAt(config.sourcePath.length -1) !== "/") {
+    config.sourcePath += "/";
+}
 
 function debug(...msgs) {
     if (config.debugging) {
