@@ -178,7 +178,7 @@ function listChildren(node, filter, children = [], nextToken = undefined) {
 }
 
 //create md5 hash of a file for did change check:
-function md5Hash(filename) {
+function createMD5Hash(filename) {
     let promise = new NodePromise(function resolver(resolve, reject) {
         let md5sum = crypto.createHash("md5");
         const input = fs.createReadStream(filename);
@@ -188,7 +188,13 @@ function md5Hash(filename) {
                 md5sum.update(data);
             } else {
                 const d = md5sum.digest("hex");
-                resolve(d);
+                if (config.writeHashes) {
+                    writeFilePromise(filename + ".md5", d, "utf8").then(function () {
+                        resolve(d);
+                    });
+                } else {
+                    resolve(d);
+                }
             }
         });
         input.on("error", function (err) {
