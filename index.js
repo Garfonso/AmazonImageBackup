@@ -35,13 +35,19 @@ const writeFilePromise = NodePromise.denodeify(fs.writeFile);
 
 let authHeader;
 let refreshToken;
-function requestPromise(options, postData, decode = true, retry = 0) {
+function requestPromise(options, postData, decode = true, overwriteOptions = false, retry = 0) {
     //add auth header.
     if (authHeader) {
         if (options.headers) {
             options.headers.Authorization = authHeader;
         } else {
             options.headers = {"Authorization": authHeader};
+        }
+    }
+    if (overwriteOptions) {
+        options.method = overwriteOptions.method || options.method;
+        if (overwriteOptions.headers) {
+            Object.keys(overwriteOptions.headers).forEach((key) => options.headers[key] = overwriteOptions.headers[key]);
         }
     }
     let promise = new NodePromise(function resolver(resolve, reject) {
@@ -63,7 +69,7 @@ function requestPromise(options, postData, decode = true, retry = 0) {
                     //need to refresh token.
                     let innerPromise = refreshToken(true);
                     innerPromise = innerPromise.then(function retryRequest() { //retry request.
-                        return requestPromise(options, postData, decode, retry + 1);
+                        return requestPromise(options, postData, decode, overwriteOptions, retry + 1);
                     });
                     resolve(innerPromise);
                 } else {
@@ -73,14 +79,34 @@ function requestPromise(options, postData, decode = true, retry = 0) {
         });
         req.on("error", (err) => reject(err));
         //debug("Writing:", postData);
-        req.end(postData);
+        if (overwriteOptions && overwriteOptions.filestream) {
+            req.write(postData, "utf8");
+            //debug("Writing\n" + postData);
+            overwriteOptions.filestream.on("readable", function () {
+                let data = overwriteOptions.filestream.read();
+                if (data) {
+                    //debug("...");
+                    stats.bytesUploaded += data.byteLength;
+                    req.write(data, "binary");
+                } else {
+                    //debug(overwriteOptions.footerData);
+                    req.end(overwriteOptions.footerData, "utf8");
+                }
+            });
+        } else if (overwriteOptions && overwriteOptions.buffer) {
+            req.write(postData, "utf8");
+            req.write(overwriteOptions.buffer, "binary");
+            req.end(overwriteOptions.footerData, "utf8");
+        } else {
+            req.end(postData);
+        }
     });
 
     return promise;
 }
 
 //request from metadata server
-function requestMetadata(path, jsonData, decode) {
+function requestMetadata(path, jsonData, decode, overwriteOptions) {
     let options = url.parse(auth.metadataUrl + path);
     let postData;
     if (jsonData) {
@@ -88,12 +114,13 @@ function requestMetadata(path, jsonData, decode) {
         options.headers = {"Content-Length": Buffer.byteLength(postData)};
         options.method = "POST";
     }
-    return requestPromise(options, postData, decode);
+    return requestPromise(options, postData, decode, overwriteOptions);
 }
 //request from content server
-function requestContent(path, decode) {
+function requestContent(path, data, decode, overwriteOptions) {
     let options = url.parse(auth.contentUrl + path);
-    return requestPromise(options, undefined, decode);
+    options.method = "POST";
+    return requestPromise(options, data, decode, overwriteOptions);
 }
 //handle all token stuff. will also update authorization header.
 refreshToken = function(realRefresh) {
@@ -175,6 +202,111 @@ function listChildren(node, filter, children = [], nextToken = undefined) {
     });
 
     return promise;
+}
+
+function findTypeFromName(name) {
+    let ext = path.extname(name).toLocaleLowerCase();
+    switch (ext) {
+        case ".cod":
+            return "cis-cod";
+        case ".ras":
+            return "cmu-raster";
+        case ".bmp":
+        case ".bm":
+            return "bmp";
+        case ".fif":
+            return "fif";
+        case ".gif":
+            return "gif";
+        case ".ief":
+            return "ief";
+        case ".jpeg":
+        case ".jpg":
+        case ".jpe":
+            return "jpeg";
+        case ".png":
+            return "png";
+        case ".tif":
+        case ".tiff":
+            return "tiff";
+        case ".mcf":
+            return "vasa";
+        case ".wbmp":
+            return "vnd.wap.wbmp";
+        case ".fh4":
+        case ".fh5":
+        case ".fhc":
+            return "x-freehand";
+        case ".ico":
+            return "x-icon";
+        case ".pic":
+            return "pict";
+        case ".pnm":
+            return "x-portable-anymap";
+        case ".pbm":
+            return "x-portable-bitmap";
+        case ".pgm":
+            return "x-portable-graymap";
+        case ".ppm":
+            return "x-portable-pixmap";
+        case ".rgp":
+            return "x-rgb";
+        case ".xwd":
+            return "x-windowdump";
+        case ".xbm":
+            return "x-xbitmap";
+        case ".xpm":
+            return "x-xpixmap";
+        default:
+            return "jpeg";
+    }
+}
+
+//if it already exists, old file will be moved to trash.
+function uploadFile(localChild) {
+    //debug("Starting upload.");
+    /*if (localChild.inCloud) {
+        debug("Uploading newer version, will remove old file first.");
+        promise = requestMetadata("trash/" + localChild.node.id, null, true, {method: "PUT"});
+    } else {
+        promise = NodePromise.resolve(true);
+    }*/
+    let data = "----WebKitFormBoundaryE19zNvXGzXaLvS5C\r\n";
+    if (!localChild.inCloud) { //for new file add metadata:
+        //debug("File not present, add metadata.");
+        data += "Content-Disposition: form-data; name=\"metadata\"\r\n\r\n";
+        let metadata = {
+            name: localChild.name,
+            kind: "FILE",
+            parents: [localChild.parentNode.id]
+        };
+        data += JSON.stringify(metadata) + "\r\n----WebKitFormBoundaryE19zNvXGzXaLvS5C\r\n";
+    }
+    data += "Content-Disposition: form-data; name=\"content\"; ";
+    data += "filename=\"" + localChild.name + "\"\r\n";
+    data += "Content-Type: image/" + findTypeFromName(localChild.name) + "\r\n\r\n";
+
+    let uploadPath = "nodes";
+    let overwriteOptions = {
+        method: "POST",
+        filestream: fs.createReadStream(localChild.path),
+        footerData: "\r\n----WebKitFormBoundaryE19zNvXGzXaLvS5C--\r\n"
+    };
+    if (localChild.inCloud) {
+        uploadPath += "/" + localChild.node.id + "/content";
+        overwriteOptions.method = "PUT";
+    } else {
+        uploadPath += "?suppress=deduplication";
+    }
+
+    overwriteOptions.headers = {
+        "Content-Type": "multipart/form-data; boundary=--WebKitFormBoundaryE19zNvXGzXaLvS5C"
+    };
+    debug("Uploading " + localChild.name + " to " + localChild.parentNode.name);
+    //debug("Url: ", uploadPath);
+    //debug("Options:", overwriteOptions);
+    stats.uploaded += 1;
+    return requestContent(uploadPath, data, true, overwriteOptions);
 }
 
 //create md5 hash of a file for did change check:
