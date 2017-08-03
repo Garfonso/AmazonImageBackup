@@ -23,6 +23,9 @@ if (config.targetPath.charAt(config.targetPath.length -1) !== "/") {
 if (config.sourcePath.charAt(config.sourcePath.length -1) !== "/") {
     config.sourcePath += "/";
 }
+if (config.screenSaverTarget.charAt(config.screenSaverTarget.length -1) !== "/") {
+    config.screenSaverTarget += "/";
+}
 if (config.silent) {
     config.debugging = false;
 }
@@ -260,12 +263,6 @@ function findTypeFromName(name) {
 //if it already exists, old file will be moved to trash.
 function uploadFile(localChild, retry = 0) {
     //debug("Starting upload.");
-    /*if (localChild.inCloud) {
-        debug("Uploading newer version, will remove old file first.");
-        promise = requestMetadata("trash/" + localChild.node.id, null, true, {method: "PUT"});
-    } else {
-        promise = NodePromise.resolve(true);
-    }*/
     let data = "----WebKitFormBoundaryE19zNvXGzXaLvS5C\r\n";
     if (!localChild.inCloud) { //for new file add metadata:
         //debug("File not present, add metadata.");
@@ -288,6 +285,11 @@ function uploadFile(localChild, retry = 0) {
         footerData: "\r\n----WebKitFormBoundaryE19zNvXGzXaLvS5C--\r\n",
         manualRetry: true
     };
+    if (localChild.buffer) { //use already in memory data
+        delete overwriteOptions.filestream;
+        overwriteOptions.manualRetry = false; //buffer stays alright.
+        overwriteOptions.buffer = localChild.buffer;
+    }
     if (localChild.inCloud) {
         uploadPath += "/" + localChild.node.id + "/content";
         overwriteOptions.method = "PUT";
@@ -362,6 +364,7 @@ function checkForDifference(localChild) {
         let ip = statPromise(localChild.path);
         ip = ip.then(function (stat) {
             localChild.mtime = stat.mtime;
+            localChild.ctime = stat.ctime;
             return statPromise(localChild.path + ".md5");
         });
         ip = ip.then(function (stat) {
@@ -395,22 +398,200 @@ function checkForDifference(localChild) {
     return promise;
 }
 
+let uploadScreenSaver;
 function processFile(localChild) {
     if (localChild.inCloud && localChild.node.kind !== "FILE") {
         throw "Error " + localChild.name + " exists as file in " + localChild.parent + ", but remotely is " + localChild.node.kind + ". Please corect manually.";
     }
     stats.filesProcessed += 1;
 
+    let promise;
     if (filterFile(localChild.name)) {
         if (!localChild.inCloud) {
-            return uploadFile(localChild);
+            promise = uploadFile(localChild);
         } else {
+            promise = checkForDifference(localChild);
+        }
+
+        if (config.createScreenSaverFiles) {
+            promise = promise.then(function doSCStuff() {
+                //will modify localChild.
+                return uploadScreenSaver(localChild);
+            });
+        }
+    } else {
+        stats.skipped += 1;
+        debug("Skipping " + localChild.name);
+        promise = NodePromise.resolve(true);
+    }
+
+    return promise;
+}
+
+/********************************************************************************************************
+ Screensaver stuff
+ ********************************************************************************************************/
+function createScreenSaverFilename(localChild) {
+    let name = localChild.path.substring(config.sourcePath.length);
+    if (name.charAt(0) === "/") {
+        name = name.substring(1);
+    }
+    return name.replace(/\//g, "-");
+}
+
+function deleteFile(node, parent) {
+    const urlPath = "nodes/" + parent.id + "/children/" + node.id;
+    return requestMetadata(urlPath, undefined, { method: "DELETE"});
+}
+
+let Jimp;
+if (config.createScreenSaverFiles) {
+    Jimp = require("jimp");
+}
+
+let scNodes; //all nodes in screensaver dir
+let scFiles; //all filenames in screensaver dir
+let scNode; //node of screensaver dir.
+let scFont;
+let scFontBlack;
+uploadScreenSaver = function(localChild) {
+    localChild.name = createScreenSaverFilename(localChild);
+
+    let promise = Jimp.read(localChild.path);
+
+    promise = promise.then(function (image) {
+        return image.scaleToFit(1920, 1080, Jimp.RESIZE_BICUBIC);
+    });
+
+    promise = promise.then(function (image) {
+        let h = image.bitmap.height - 126;
+        if (!h) {
+            h = 18;
+        }
+        debug("Got image", image);
+        return image.print(scFontBlack, 18, h, localChild.parentNode.name);
+    });
+
+    promise = promise.then(function (image) {
+        let h = image.bitmap.height - 86;
+        if (!h) {
+            h = 40;
+        }
+        return  image.print(scFontBlack, 18, h, localChild.ctime.getDay() + "." + (localChild.ctime.getMonth()+1) + "." + localChild.ctime.getFullYear());
+    });
+
+    promise = promise.then(function (image) {
+        let h = image.bitmap.height - 128;
+        if (!h) {
+            h = 10;
+        }
+        debug("Got image", image);
+        return image.print(scFont, 16, h, localChild.parentNode.name);
+    });
+
+    promise = promise.then(function (image) {
+        let h = image.bitmap.height - 88;
+        if (!h) {
+            h = 10;
+        }
+        return  image.print(scFont, 16, h, localChild.ctime.getDay() + "." + (localChild.ctime.getMonth()+1) + "." + localChild.ctime.getFullYear());
+    });
+
+    promise = promise.then(function createBuffer(image) {
+        debug("Image printed", image);
+        return new NodePromise(function resolver(resolve, reject) {
+            image.getBuffer(Jimp.AUTO, function (err, buffer) {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(buffer);
+                }
+            });
+        });
+    });
+
+    promise = promise.then(function doUpload(buffer) {
+        debug("Got buffer", buffer);
+        const index = scFiles.indexOf(localChild.name);
+        localChild.buffer = buffer;
+        localChild.parentNode = scNode;
+        if (index >= 0) {
+            //already inCloud! :)
+            localChild.node = scNodes[index];
+            localChild.node.localPresent = true; //do real sync in screensaver dir.
+            localChild.inCloud = true;
             return checkForDifference(localChild);
+        } else {
+            localChild.inCloud = false;
+            return uploadFile(localChild);
+        }
+    }, function (err) {
+        debug("Could not create screensaver file for " + localChild.path + " because: ", err);
+        return true;
+    });
+
+    return promise;
+};
+
+function removeOrphanedFromScreensaverDir() {
+    function maybeRemove(nodes) {
+        const node = nodes.shift();
+        if (!node) {
+            return NodePromise.resolve(true);
+        }
+        if (!node.localPresent) {
+            //remove node:
+            let promise = deleteFile(node, scNode);
+            promise = promise.then(function () {
+                return maybeRemove(nodes);
+            });
+        } else {
+            return maybeRemove(nodes);
         }
     }
-    //else
-    stats.skipped += 1;
-    debug("Skipping " + localChild.name);
+
+    maybeRemove(scNodes);
+}
+
+let root;
+let findOrCreateNodePath;
+function findAndReadSCDir() {
+    let currentNode = root;
+    let currentPath = "/";
+    let remainingPathItems = config.screenSaverTarget.split("/");
+    remainingPathItems.pop();
+    remainingPathItems.shift();
+    let promise = findOrCreateNodePath(remainingPathItems, currentNode, currentPath, config.screenSaverTarget);
+    scFiles = [];
+
+    debug("Finding scRoot from ", currentNode, " looking for ", remainingPathItems);
+    promise = promise.then(function (scRoot) {
+        scNode = scRoot;
+        debug("SC Root: ", scNode);
+        return listChildren(scNode);
+    });
+
+    promise = promise.then(function (children) {
+        scNodes = children;
+        debug("scNodes: ", children);
+        scNodes.forEach(function (child) { scFiles.push(child.name);});
+        debug("scFilenames:", scFiles);
+    });
+
+    promise = promise.then(function loadFont() {
+        return Jimp.loadFont(Jimp.FONT_SANS_32_WHITE);
+    });
+
+    promise = promise.then(function (font) {
+        scFont = font;
+        return Jimp.loadFont(Jimp.FONT_SANS_32_BLACK);
+    });
+
+    promise = promise.then(function (font) {
+        scFontBlack = font;
+    });
+
+    return promise;
 }
 
 /********************************************************************************************************
@@ -504,6 +685,35 @@ syncFolder = function(node, folderPath) {
     return promise;
 };
 
+findOrCreateNodePath = function(remainingPathItems, currentNode, currentPath, targetPath = config.targetPath) {
+    //debug("remainingPath: ", remainingPathItems);
+    if (remainingPathItems.length === 0) {
+        if (currentPath !== targetPath) {
+            throw currentPath + " != " + targetPath + ". Somehow path hangling went wrong.";
+        }
+        return currentNode;
+    }
+    let innerPromise = listChildren(currentNode, "kind:FOLDER");
+    innerPromise = innerPromise.then(function (children) {
+        let found = false;
+        children.forEach(function (child) {
+            if (child.name === remainingPathItems[0]) {
+                //debug("Found next part: ", child);
+                currentNode = child;
+                currentPath += child.name + "/";
+                found = true;
+            }
+        });
+        if (!found) {
+            return createFolder(currentNode, remainingPathItems[0], currentPath + remainingPathItems[0]);
+        }
+        remainingPathItems.shift();
+        return findOrCreateNodePath(remainingPathItems, currentNode, currentPath, targetPath);
+    });
+
+    return innerPromise;
+};
+
 /********************************************************************************************************
  "Main"
  ********************************************************************************************************/
@@ -516,47 +726,36 @@ promise = promise.then(function getRootNode() {
 });
 
 promise = promise.then(function hangleToTargetPath(data) {
-    let root = nodesFromData(data)[0]; //can we have multiple root nodes?
+    root = nodesFromData(data)[0]; //can we have multiple root nodes?
     let currentNode = root;
     let currentPath = "/";
     let remainingPathItems = config.targetPath.split("/");
     remainingPathItems.pop();
     remainingPathItems.shift();
 
-    function getDown() {
-        //debug("remainingPath: ", remainingPathItems);
-        if (remainingPathItems.length === 0) {
-            if (currentPath !== config.targetPath) {
-                throw currentPath + " != " + config.targetPath + ". Somehow path hangling went wrong.";
-            }
-            return currentNode;
-        }
-        let innerPromise = listChildren(currentNode, "kind:FOLDER");
-        innerPromise = innerPromise.then(function (children) {
-            let found = false;
-            children.forEach(function (child) {
-                if (child.name === remainingPathItems[0]) {
-                    //debug("Found next part: ", child);
-                    currentNode = child;
-                    currentPath += child.name + "/";
-                    found = true;
-                }
-            });
-            if (!found) {
-                return createFolder(currentNode, remainingPathItems[0], currentPath + remainingPathItems[0]);
-            }
-            remainingPathItems.shift();
-            return getDown();
+    return findOrCreateNodePath(remainingPathItems, currentNode, currentPath, config.targetPath);
+});
+
+promise = promise.then(function scInit(targetRoot) {
+    if (config.createScreenSaverFiles) {
+        return findAndReadSCDir().then(function () {
+            return targetRoot;
         });
-
-        return innerPromise;
+    } else {
+        return targetRoot;
     }
-
-    return getDown();
 });
 
 promise = promise.then(function startBackup(targetRoot) {
     return syncFolder(targetRoot, config.sourcePath);
+});
+
+promise = promise.then(function scCleanUp() {
+    if(config.createScreenSaverFiles) {
+        return removeOrphanedFromScreensaverDir();
+    } else {
+        return true;
+    }
 });
 
 promise = promise.then(function allgood() {
