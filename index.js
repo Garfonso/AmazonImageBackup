@@ -90,7 +90,12 @@ function requestPromise(options, postData, decode = true, overwriteOptions = fal
                     //need to refresh token.
                     let innerPromise = refreshToken(true);
                     innerPromise = innerPromise.then(function retryRequest() { //retry request.
-                        return requestPromise(options, postData, decode, overwriteOptions, retry + 1);
+                        if (overwriteOptions && overwriteOptions.manualRetry) {
+                            //do this if a filestream is already closed (image upload) or similar.
+                            throw "Need retry";
+                        } else {
+                            return requestPromise(options, postData, decode, overwriteOptions, retry + 1);
+                        }
                     });
                     resolve(innerPromise);
                 } else {
@@ -253,7 +258,7 @@ function findTypeFromName(name) {
 }
 
 //if it already exists, old file will be moved to trash.
-function uploadFile(localChild) {
+function uploadFile(localChild, retry = 0) {
     //debug("Starting upload.");
     /*if (localChild.inCloud) {
         debug("Uploading newer version, will remove old file first.");
@@ -280,7 +285,8 @@ function uploadFile(localChild) {
     let overwriteOptions = {
         method: "POST",
         filestream: fs.createReadStream(localChild.path),
-        footerData: "\r\n----WebKitFormBoundaryE19zNvXGzXaLvS5C--\r\n"
+        footerData: "\r\n----WebKitFormBoundaryE19zNvXGzXaLvS5C--\r\n",
+        manualRetry: true
     };
     if (localChild.inCloud) {
         uploadPath += "/" + localChild.node.id + "/content";
@@ -298,7 +304,17 @@ function uploadFile(localChild) {
     //debug("Url: ", uploadPath);
     //debug("Options:", overwriteOptions);
     stats.uploaded += 1;
-    return requestContent(uploadPath, data, true, overwriteOptions);
+    let promise = requestContent(uploadPath, data, true, overwriteOptions);
+    promise = promise.then(function ignore(result) {
+        return result;
+    }, function checkRetry(error) {
+        debug("Had error", error);
+        if (!retry) {
+            debug("Will retry upload.");
+            return uploadFile(localChild, retry + 1);
+        }
+    });
+    return promise;
 }
 
 /********************************************************************************************************
