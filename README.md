@@ -1,5 +1,7 @@
 # AmazonImageBackup
 
+As you might have heared, Amazon closed down the Api to Amazon Photos. So none of this still works. I'll leave it here for documentation purposes.
+
 A tool to sync image files to Amazon Drive.
 
 Currently Amazon does not accept new apps to use their API, so we have to "use" a foreign Client Secret. One example is https://drivesink.appspot.com.
