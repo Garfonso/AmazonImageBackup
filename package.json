@@ -22,7 +22,7 @@
   },
   "homepage": "https://github.com/Garfonso/AmazonImageSync#readme",
   "dependencies": {
-    "jimp": "^0.2.28",
+    "jimp": "^0.3.7",
     "promise": "^8.0.1"
   }
 }
